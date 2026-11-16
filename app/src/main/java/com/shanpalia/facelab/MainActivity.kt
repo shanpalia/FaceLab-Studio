@@ -26,6 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
+import android.widget.VideoView
+import coil.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -226,6 +230,61 @@ fun FaceLabApp(onExit: () -> Unit) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             MediaCard("1", "Source Face", faceUri != null, Modifier.weight(1f)) { facePicker.launch("image/*") }
                             MediaCard("2", "Target Video", videoUri != null, Modifier.weight(1f)) { videoPicker.launch("video/*") }
+                        }
+                        if (faceUri != null || videoUri != null) {
+                            Text("Selected Media Preview", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                                if (faceUri != null) {
+                                    Card(
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(18.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White)
+                                    ) {
+                                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text("Source Photo", color = Ink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            AsyncImage(
+                                                model = faceUri,
+                                                contentDescription = "Selected source face photo preview",
+                                                modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                }
+                                if (videoUri != null) {
+                                    Card(
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(18.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White)
+                                    ) {
+                                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text("Target Video", color = Ink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            AndroidView(
+                                                factory = { viewContext ->
+                                                    VideoView(viewContext).apply {
+                                                        setVideoURI(videoUri)
+                                                        setOnPreparedListener { player ->
+                                                            player.isLooping = true
+                                                            start()
+                                                        }
+                                                    }
+                                                },
+                                                update = { player ->
+                                                    if (player.tag != videoUri.toString()) {
+                                                        player.tag = videoUri.toString()
+                                                        player.setVideoURI(videoUri)
+                                                        player.setOnPreparedListener { prepared ->
+                                                            prepared.isLooping = true
+                                                            player.start()
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp))
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Button(
                             onClick = {
