@@ -355,6 +355,11 @@ private suspend fun uploadAndRequestProcessing(
     var faceFile: File? = null
     var videoFile: File? = null
     try {
+        // Do not upload personal media unless the server confirms a real AI adapter is ready.
+        val health = request("$API_BASE/health", "GET")
+        require(health.optString("ai") == "ready") {
+            "AI face-swap processing is not enabled yet. Your photo and video were not uploaded."
+        }
         onProgress("Preparing media files…")
         faceFile = cacheUri(faceUri, "face")
         videoFile = cacheUri(videoUri, "video")
