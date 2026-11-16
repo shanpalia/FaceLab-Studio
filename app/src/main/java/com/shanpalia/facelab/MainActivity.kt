@@ -1,6 +1,7 @@
 package com.shanpalia.facelab
 
 import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -35,6 +36,11 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 
 private val Mint = Color(0xFF24C99A)
 private val Ink = Color(0xFF14232D)
@@ -42,6 +48,7 @@ private val Muted = Color(0xFF71818A)
 private val Page = Color(0xFFF6F9F8)
 private const val APP_VERSION = "1.0.0"
 private const val UPDATE_MANIFEST = "https://raw.githubusercontent.com/shanpalia/WebsitePaliaAPK_V.2/main/facelab-studio.json"
+private const val API_BASE = "https://facelab-studio-api.shanpalia786.workers.dev"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +69,7 @@ fun FaceLabApp(onExit: () -> Unit) {
     var latestVersion by remember { mutableStateOf<String?>(null) }
     var updateUrl by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
+    var processing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = true) {
@@ -220,14 +228,30 @@ fun FaceLabApp(onExit: () -> Unit) {
                             MediaCard("2", "Target Video", videoUri != null, Modifier.weight(1f)) { videoPicker.launch("video/*") }
                         }
                         Button(
-                            onClick = { notice = "AI processing is not connected yet. Your media selection is ready; a verified free GPU endpoint must be connected before a real face swap can run." },
+                            onClick = {
+                                if (!processing && faceUri != null && videoUri != null) {
+                                    processing = true
+                                    notice = "Preparing secure upload…"
+                                    scope.launch {
+                                        val result = runCatching {
+                                            uploadAndRequestProcessing(context, faceUri!!, videoUri!!) { notice = it }
+                                        }
+                                        notice = result.fold(
+                                            onSuccess = { it },
+                                            onFailure = { "Upload failed: ${it.message ?: "Please try again."}" }
+                                        )
+                                        processing = false
+                                    }
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth().height(54.dp),
-                            enabled = faceUri != null && videoUri != null,
+                            enabled = faceUri != null && videoUri != null && !processing,
                             shape = RoundedCornerShape(17.dp)
                         ) {
-                            Icon(Icons.Rounded.AutoFixHigh, null)
+                            if (processing) CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp)
+                            else Icon(Icons.Rounded.AutoFixHigh, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Swap Face", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(if (processing) "Uploading…" else "Swap Face", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                         Text(notice, color = Muted, fontSize = 12.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -286,5 +310,95 @@ private fun MediaCard(number: String, title: String, selected: Boolean, modifier
         Icon(if (title == "Source Face") Icons.Rounded.Person else Icons.Rounded.VideoLibrary, null, tint = Ink, modifier = Modifier.size(27.dp))
         Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
         Text(if (selected) "Selected" else "Tap to choose", color = if (selected) Mint else Muted, fontSize = 11.sp)
+    }
+}
+
+
+private suspend fun uploadAndRequestProcessing(
+    context: Context,
+    faceUri: Uri,
+    videoUri: Uri,
+    onProgress: (String) -> Unit
+): String = withContext(Dispatchers.IO) {
+    fun request(url: String, method: String, token: String? = null, body: ByteArray? = null, contentType: String? = null): JSONObject {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20000
+            readTimeout = 60000
+            requestMethod = method
+            if (token != null) setRequestProperty("Authorization", "Bearer $token")
+            if (contentType != null) setRequestProperty("Content-Type", contentType)
+            if (body != null) {
+                doOutput = true
+                setFixedLengthStreamingMode(body.size)
+                outputStream.use { it.write(body) }
+            }
+        }
+        try {
+            val code = connection.responseCode
+            val stream = if (code in 200..299 || code == 503) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("error", text) }
+            if (code !in 200..299 && code != 503) error(json.optString("error", "HTTP $code"))
+            return json.put("_httpCode", code)
+        } finally { connection.disconnect() }
+    }
+
+    fun cacheUri(uri: Uri, label: String): File {
+        val file = File(context.cacheDir, "facelab-$label-${System.currentTimeMillis()}")
+        context.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "Could not read selected $label." }
+            FileOutputStream(file).use { output -> input.copyTo(output) }
+        }
+        return file
+    }
+
+    var faceFile: File? = null
+    var videoFile: File? = null
+    try {
+        onProgress("Preparing media files…")
+        faceFile = cacheUri(faceUri, "face")
+        videoFile = cacheUri(videoUri, "video")
+        require(faceFile.length() <= 12L * 1024 * 1024) { "Face photo must be under 12 MB." }
+        require(videoFile.length() <= 80L * 1024 * 1024) { "Video must be under 80 MB." }
+
+        onProgress("Creating secure upload job…")
+        val created = request("$API_BASE/v1/jobs", "POST", body="{}".toByteArray(), contentType="application/json")
+        val jobId = created.getString("jobId")
+        val token = created.getString("uploadToken")
+
+        fun upload(file: File, kind: String, mime: String) {
+            onProgress("Uploading $kind to private Cloudflare R2…")
+            val connection = (URL("$API_BASE/v1/jobs/$jobId/$kind").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 20000
+                readTimeout = 120000
+                requestMethod = "PUT"
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("Content-Type", mime)
+                setFixedLengthStreamingMode(file.length())
+            }
+            try {
+                FileInputStream(file).use { input -> connection.outputStream.use { output -> input.copyTo(output) } }
+                val code = connection.responseCode
+                val text = (if (code in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) error(JSONObject(text).optString("error", "Upload failed ($code)"))
+            } finally { connection.disconnect() }
+        }
+
+        val faceMime = context.contentResolver.getType(faceUri) ?: "image/jpeg"
+        val videoMime = context.contentResolver.getType(videoUri) ?: "video/mp4"
+        upload(faceFile, "face", faceMime)
+        upload(videoFile, "video", videoMime)
+        onProgress("Files uploaded. Checking free AI provider…")
+        val processed = request("$API_BASE/v1/jobs/$jobId/process", "POST", token, "{}".toByteArray(), "application/json")
+        val status = processed.optString("status")
+        if (status == "waiting_for_ai_provider") {
+            "Your photo and video are uploaded securely. Free AI GPU processing is not connected yet, so no face-swapped video was created. Job ID: $jobId"
+        } else {
+            processed.optString("message", "Job status: $status")
+        }
+    } finally {
+        faceFile?.delete()
+        videoFile?.delete()
     }
 }
