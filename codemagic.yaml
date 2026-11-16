@@ -6,7 +6,7 @@ workflows:
     environment:
       java: 17
       android_signing:
-        - keystore_reference: facelab_keystore
+        - keystore_reference: paliaapk-release
     scripts:
       - name: Build signed release APK
         script: |
