@@ -8,10 +8,7 @@ workflows:
     scripts:
       - name: Build debug APK
         script: |
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          gradle --version
+          gradle --no-daemon assembleDebug
     artifacts:
       - app/build/outputs/apk/debug/*.apk
-    publishing:
-      email:
-        recipients: []
