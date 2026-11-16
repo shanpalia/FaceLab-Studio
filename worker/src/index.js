@@ -39,10 +39,13 @@ export default {
     const parts = url.pathname.split("/").filter(Boolean);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return cors(json({ ok: true, service: "FaceLab Studio API", storage: "connected", ai: env.AI_PROVIDER_URL ? "configured" : "not_configured" }));
+      return cors(json({ ok: true, service: "FaceLab Studio API", storage: "connected", ai: env.AI_PROVIDER_READY === "true" ? "ready" : "not_ready" }));
     }
 
     if (request.method === "POST" && url.pathname === "/v1/jobs") {
+      if (env.AI_PROVIDER_READY !== "true") {
+        return cors(json({ error: "AI processing is not enabled. Media upload is disabled until a provider adapter is deployed." }, 503));
+      }
       const id = crypto.randomUUID();
       const uploadToken = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("");
       const job = {
