@@ -234,7 +234,7 @@ fun FaceLabApp(onExit: () -> Unit) {
                                     notice = "Preparing secure upload…"
                                     scope.launch {
                                         val result = runCatching {
-                                            uploadAndRequestProcessing(context, faceUri!!, videoUri!!) { notice = it }
+                                            uploadAndRequestProcessing(context, faceUri!!, videoUri!!) { message -> scope.launch { notice = message } }
                                         }
                                         notice = result.fold(
                                             onSuccess = { it },
