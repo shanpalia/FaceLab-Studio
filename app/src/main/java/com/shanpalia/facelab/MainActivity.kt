@@ -1,8 +1,10 @@
 package com.shanpalia.facelab
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,8 +12,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -24,114 +28,252 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 private val Mint = Color(0xFF24C99A)
 private val Ink = Color(0xFF14232D)
 private val Muted = Color(0xFF71818A)
 private val Page = Color(0xFFF6F9F8)
+private const val APP_VERSION = "1.0.0"
+private const val UPDATE_MANIFEST = "https://raw.githubusercontent.com/shanpalia/WebsitePaliaAPK_V.2/main/facelab-studio.json"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { FaceLabApp() }
+        setContent { FaceLabApp(onExit = { finish() }) }
     }
 }
 
 @Composable
-fun FaceLabApp() {
+fun FaceLabApp(onExit: () -> Unit) {
     var faceUri by remember { mutableStateOf<Uri?>(null) }
     var videoUri by remember { mutableStateOf<Uri?>(null) }
-    var notice by remember { mutableStateOf("Choose a face photo and a target video to get started.") }
+    var screen by remember { mutableStateOf("Home") }
+    var showExit by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf("Choose your face photo and target video.") }
+    var updateState by remember { mutableStateOf("Tap Check for Updates to check PaliaAPK HUB.") }
+    var latestVersion by remember { mutableStateOf<String?>(null) }
+    var updateUrl by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    BackHandler(enabled = true) {
+        if (showExit) showExit = false
+        else if (screen != "Home") screen = "Home"
+        else showExit = true
+    }
+
     val facePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
         faceUri = it
-        if (it != null) notice = "Face photo selected. Now choose your target video."
+        if (it != null) notice = "Face photo selected."
     }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
         videoUri = it
-        if (it != null) notice = "Video selected. Review your media before processing."
+        if (it != null) notice = "Target video selected."
+    }
+
+    fun checkForUpdate() {
+        if (checking) return
+        checking = true
+        updateState = "Checking PaliaAPK HUB…"
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val connection = (URL(UPDATE_MANIFEST).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 10000
+                        readTimeout = 10000
+                        requestMethod = "GET"
+                    }
+                    try {
+                        if (connection.responseCode !in 200..299) error("Update service returned HTTP ${connection.responseCode}")
+                        JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    } finally { connection.disconnect() }
+                }
+            }
+            checking = false
+            result.onSuccess { json ->
+                latestVersion = json.optString("version").takeIf { it.isNotBlank() }
+                updateUrl = json.optString("apk_url").takeIf { it.startsWith("https://") }
+                val latest = latestVersion
+                updateState = when {
+                    latest == null -> "Update information is incomplete."
+                    latest != APP_VERSION && updateUrl != null -> "Version $latest is available."
+                    latest != APP_VERSION -> "Version $latest is listed, but its download link is not ready."
+                    else -> "You're up to date — version $APP_VERSION."
+                }
+            }.onFailure { updateState = "Could not check updates. Please try again later." }
+        }
     }
 
     MaterialTheme(colorScheme = lightColorScheme(
         primary = Mint, onPrimary = Color.White, background = Page, surface = Color.White,
         onSurface = Ink, secondary = Ink
     )) {
-        Scaffold(containerColor = Page, bottomBar = { BottomBar() }) { padding ->
+        Scaffold(
+            containerColor = Page,
+            bottomBar = {
+                NavigationBar(containerColor = Color.White, tonalElevation = 5.dp) {
+                    listOf("Home", "Creations", "Tools", "Settings").forEach { item ->
+                        val icon = when (item) {
+                            "Home" -> Icons.Rounded.Home
+                            "Creations" -> Icons.Rounded.Collections
+                            "Tools" -> Icons.Rounded.Tune
+                            else -> Icons.Rounded.Settings
+                        }
+                        NavigationBarItem(
+                            selected = screen == item,
+                            onClick = { screen = item },
+                            icon = { Icon(icon, contentDescription = item) },
+                            label = { Text(item) }
+                        )
+                    }
+                }
+            }
+        ) { padding ->
             Column(
-                Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(15.dp)
             ) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(
                         Brush.linearGradient(listOf(Color(0xFF102A35), Color(0xFF1D806B)))
                     ), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.FaceRetouchingNatural, null, tint = Mint, modifier = Modifier.size(29.dp))
+                        Icon(Icons.Rounded.FaceRetouchingNatural, null, tint = Mint, modifier = Modifier.size(28.dp))
                     }
-                    Spacer(Modifier.width(11.dp))
+                    Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("FaceLab Studio", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+                        Text("FaceLab Studio", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
                         Text("By PaliaAPK HUB", fontSize = 11.sp, color = Muted, fontWeight = FontWeight.SemiBold)
                     }
-                    Icon(Icons.Rounded.Settings, "Settings", tint = Ink)
+                    IconButton(onClick = { screen = "Settings" }) { Icon(Icons.Rounded.Settings, "Settings", tint = Ink) }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Create your face swap", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text("Your media stays on your device in this starter build.", fontSize = 13.sp, color = Muted)
-                }
-
-                // Cinematic preview panel from the approved Neon AI visual direction.
-                Box(
-                    Modifier.fillMaxWidth().height(178.dp).clip(RoundedCornerShape(24.dp))
-                        .background(Brush.linearGradient(listOf(Color(0xFF0C1D28), Color(0xFF17483F)))),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        Icon(Icons.Rounded.FaceRetouchingNatural, null, tint = Mint, modifier = Modifier.size(48.dp))
-                        Text("AI FACE PREVIEW", color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                        Text("Select media to prepare your preview", color = Color(0xFFB9D4CE), fontSize = 12.sp)
+                when (screen) {
+                    "Settings" -> {
+                        Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        SettingRow("Branding", "By PaliaAPK HUB")
+                        SettingRow("Developer", "Developer by ShanPalia")
+                        SettingRow("App version", APP_VERSION)
+                        Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.SystemUpdate, null, tint = Mint)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("App Updates", fontWeight = FontWeight.Bold, color = Ink)
+                                }
+                                Text(updateState, color = Muted, fontSize = 13.sp)
+                                Button(onClick = { checkForUpdate() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) {
+                                    if (checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                                    else Text("Check for Updates")
+                                }
+                                if (latestVersion != null && latestVersion != APP_VERSION && updateUrl != null) {
+                                    Text("New version: $latestVersion", color = Mint, fontWeight = FontWeight.Bold)
+                                    OutlinedButton(onClick = {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl))
+                                        // Opens the official PaliaAPK HUB APK download URL.
+                                        androidx.compose.ui.platform.LocalContext.current.startActivity(intent)
+                                    }, modifier = Modifier.fillMaxWidth()) { Text("Download Update") }
+                                }
+                            }
+                        }
+                        SettingRow("Ads", "AdMob-ready • Ads not enabled yet")
+                        SettingRow("Privacy", "Media access uses Android system picker")
+                        Text("Developer by ShanPalia", color = Muted, fontSize = 12.sp)
                     }
-                    Surface(Modifier.align(Alignment.TopEnd).padding(13.dp), color = Color(0x3324C99A), shape = CircleShape) {
-                        Text("AI STUDIO", Modifier.padding(horizontal = 11.dp, vertical = 6.dp), color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    "Creations" -> {
+                        Text("My Creations", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        EmptyPanel("Your processed videos will appear here.")
+                    }
+                    "Tools" -> {
+                        Text("AI Tools", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        EmptyPanel("More AI tools will be added here.")
+                        Text("Rewarded Ads are reserved for earning free credits. AdMob will be connected after your account is ready.", color = Muted, fontSize = 12.sp)
+                    }
+                    else -> {
+                        Text("Create your face swap", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("Choose a source photo and a target video.", fontSize = 13.sp, color = Muted)
+                        Box(
+                            Modifier.fillMaxWidth().height(165.dp).clip(RoundedCornerShape(24.dp))
+                                .background(Brush.linearGradient(listOf(Color(0xFF0C1D28), Color(0xFF17483F)))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Rounded.FaceRetouchingNatural, null, tint = Mint, modifier = Modifier.size(46.dp))
+                                Text("AI FACE PREVIEW", color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                                Text("Your selected media will be used for processing", color = Color(0xFFB9D4CE), fontSize = 11.sp)
+                            }
+                            Surface(Modifier.align(Alignment.TopEnd).padding(12.dp), color = Color(0x3324C99A), shape = CircleShape) {
+                                Text("AI STUDIO", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            MediaCard("1", "Source Face", faceUri != null, Modifier.weight(1f)) { facePicker.launch("image/*") }
+                            MediaCard("2", "Target Video", videoUri != null, Modifier.weight(1f)) { videoPicker.launch("video/*") }
+                        }
+                        Button(
+                            onClick = { notice = "AI processing is not connected yet. Your media selection is ready; a verified free GPU endpoint must be connected before a real face swap can run." },
+                            modifier = Modifier.fillMaxWidth().height(54.dp),
+                            enabled = faceUri != null && videoUri != null,
+                            shape = RoundedCornerShape(17.dp)
+                        ) {
+                            Icon(Icons.Rounded.AutoFixHigh, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Swap Face", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                        Text(notice, color = Muted, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Security, null, tint = Mint, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Use only faces and videos you own or have permission to edit.", color = Muted, fontSize = 11.sp)
+                        }
+                        Text("Developer by ShanPalia", Modifier.fillMaxWidth().padding(bottom = 12.dp), color = Muted, fontSize = 11.sp)
                     }
                 }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MediaCard("1", "Source Face", "Choose a photo", faceUri != null, Modifier.weight(1f)) { facePicker.launch("image/*") }
-                    MediaCard("2", "Target Video", "Choose a video", videoUri != null, Modifier.weight(1f)) { videoPicker.launch("video/*") }
-                }
-
-                Button(
-                    onClick = { notice = "The face-swap processing engine is not connected yet. This build is the UI and media-selection foundation." },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    enabled = faceUri != null && videoUri != null,
-                    shape = RoundedCornerShape(18.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Mint, disabledContainerColor = Color(0xFFB8D9CF))
-                ) {
-                    Icon(Icons.Rounded.AutoFixHigh, null)
-                    Spacer(Modifier.width(9.dp))
-                    Text("Swap Face", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                }
-
-                Text(notice, color = Muted, fontSize = 12.sp)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Security, null, tint = Mint, modifier = Modifier.size(17.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Use only faces and videos you own or have permission to edit.", color = Muted, fontSize = 11.sp)
-                }
-                Spacer(Modifier.weight(1f))
-                Text("Developer by ShanPalia", Modifier.fillMaxWidth().padding(bottom = 10.dp), color = Muted, fontSize = 11.sp)
             }
+        }
+    }
+
+    if (showExit) {
+        AlertDialog(
+            onDismissRequest = { showExit = false },
+            title = { Text("Exit FaceLab Studio?") },
+            text = { Text("Do you want to close the app?") },
+            confirmButton = { TextButton(onClick = onExit) { Text("Exit") } },
+            dismissButton = { TextButton(onClick = { showExit = false }) { Text("Stay") } }
+        )
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, value: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(15.dp)) {
+            Text(title, color = Ink, fontWeight = FontWeight.Bold)
+            Text(value, color = Muted, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
-private fun MediaCard(number: String, title: String, subtitle: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun EmptyPanel(message: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(18.dp)) {
+        Text(message, Modifier.fillMaxWidth().padding(18.dp), color = Muted)
+    }
+}
+
+@Composable
+private fun MediaCard(number: String, title: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Column(
         modifier.clip(RoundedCornerShape(20.dp)).background(Color.White)
             .border(1.dp, if (selected) Mint else Color(0xFFE5ECE9), RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick).padding(14.dp),
+            .clickable(onClick = onClick).padding(13.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -139,19 +281,8 @@ private fun MediaCard(number: String, title: String, subtitle: String, selected:
             Spacer(Modifier.weight(1f))
             Icon(if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.AddCircleOutline, null, tint = Mint)
         }
-        Icon(if (title == "Source Face") Icons.Rounded.Person else Icons.Rounded.VideoLibrary,
-            null, tint = Ink, modifier = Modifier.size(28.dp))
+        Icon(if (title == "Source Face") Icons.Rounded.Person else Icons.Rounded.VideoLibrary, null, tint = Ink, modifier = Modifier.size(27.dp))
         Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        Text(if (selected) "Selected" else subtitle, color = if (selected) Mint else Muted, fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun BottomBar() {
-    NavigationBar(containerColor = Color.White, tonalElevation = 8.dp) {
-        NavigationBarItem(selected = true, onClick = {}, icon = { Icon(Icons.Rounded.Home, null) }, label = { Text("Home") })
-        NavigationBarItem(selected = false, onClick = {}, icon = { Icon(Icons.Rounded.Collections, null) }, label = { Text("Creations") })
-        NavigationBarItem(selected = false, onClick = {}, icon = { Icon(Icons.Rounded.Tune, null) }, label = { Text("Tools") })
-        NavigationBarItem(selected = false, onClick = {}, icon = { Icon(Icons.Rounded.Settings, null) }, label = { Text("Settings") })
+        Text(if (selected) "Selected" else "Tap to choose", color = if (selected) Mint else Muted, fontSize = 11.sp)
     }
 }
