@@ -1,14 +1,16 @@
 workflows:
-  android-debug-apk:
-    name: FaceLab Studio Android APK
+  android-release-apk:
+    name: FaceLab Studio Signed Release APK
     max_build_duration: 60
     instance_type: linux
     environment:
       java: 17
+      android_signing:
+        - keystore_reference: facelab_keystore
     scripts:
-      - name: Build debug APK
+      - name: Build signed release APK
         script: |
           gradle --version
-          gradle --no-daemon assembleDebug
+          gradle --no-daemon assembleRelease
     artifacts:
-      - app/build/outputs/apk/debug/*.apk
+      - app/build/outputs/apk/release/*.apk
