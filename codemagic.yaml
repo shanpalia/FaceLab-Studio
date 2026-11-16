@@ -1,16 +1,18 @@
 workflows:
   android-release-apk:
-    name: FaceLab Studio Signed Release APK
+    name: FaceLab Studio Release APK
     max_build_duration: 60
     environment:
       java: 17
       android_signing:
         - paliaapk-release
     scripts:
-      - name: Build signed release APK
+      - name: Build signed FaceLab Studio APK
         script: |
           set -e
           gradle --version
           gradle --no-daemon assembleRelease
+          mkdir -p app/build/outputs/apk/release
+          cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/FaceLab-Studio-v1.0.0.apk
     artifacts:
-      - app/build/outputs/apk/release/*.apk
+      - app/build/outputs/apk/release/FaceLab-Studio-v*.apk
