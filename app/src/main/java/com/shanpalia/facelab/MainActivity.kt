@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun FaceLabApp(onExit: () -> Unit) {
+    val context = LocalContext.current
     var faceUri by remember { mutableStateOf<Uri?>(null) }
     var videoUri by remember { mutableStateOf<Uri?>(null) }
     var screen by remember { mutableStateOf("Home") }
@@ -178,7 +180,7 @@ fun FaceLabApp(onExit: () -> Unit) {
                                     OutlinedButton(onClick = {
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl))
                                         // Opens the official PaliaAPK HUB APK download URL.
-                                        androidx.compose.ui.platform.LocalContext.current.startActivity(intent)
+                                        context.startActivity(intent)
                                     }, modifier = Modifier.fillMaxWidth()) { Text("Download Update") }
                                 }
                             }
