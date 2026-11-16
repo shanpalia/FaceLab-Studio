@@ -335,7 +335,7 @@ private suspend fun uploadAndRequestProcessing(
         }
         try {
             val code = connection.responseCode
-            val stream = if (code in 200..299 || code == 503) connection.inputStream else connection.errorStream
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("error", text) }
             if (code !in 200..299 && code != 503) error(json.optString("error", "HTTP $code"))
